@@ -5,7 +5,7 @@ description: |
   new features following NKI Beta 3 API patterns. Use this agent when you need to
   write a new NKI kernel or modify an existing one.
 mode: subagent
-color: green
+color: success
 permission:
   edit: allow
   bash: allow

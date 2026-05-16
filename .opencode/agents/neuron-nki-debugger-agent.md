@@ -5,7 +5,7 @@ description: |
   following simplicity over performance, and validates fixes. Use this agent
   when a kernel won't compile or has NCC errors.
 mode: subagent
-color: orange
+color: warning
 permission:
   edit: allow
   bash: allow

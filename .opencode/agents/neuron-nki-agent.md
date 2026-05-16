@@ -5,7 +5,7 @@ description: |
   performance, optimizing bottlenecks, migrating between API versions, analyzing
   Perfetto traces, and NKI documentation lookup.
 mode: primary
-color: green
+color: success
 permission:
   edit: allow
   bash: allow

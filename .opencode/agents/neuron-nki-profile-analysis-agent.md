@@ -5,7 +5,7 @@ description: |
   investigations to localize inefficiencies to NKI source lines. Use this agent
   when you need to profile a kernel or analyze existing profile data.
 mode: subagent
-color: magenta
+color: accent
 permission:
   edit: allow
   bash: allow
