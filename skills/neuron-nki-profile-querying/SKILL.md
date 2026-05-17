@@ -425,6 +425,41 @@ lsof -i :3002 | head -5
 - `--disable-ui` skips the web UI (port 3001) but starts the API server (port 3002).
 - `--ingest-only` writes parquet and exits — no server at all.
 
+## Troubleshooting
+
+**`neuron-explorer view` hangs after "Processing complete":**
+- Without `--ingest-only`, neuron-explorer starts an API server and blocks
+- Use `--ingest-only` if you only need parquet files for Python/pandas analysis
+- Use `--disable-ui` if you need the API server but not the web UI
+- If it appears to hang, it's likely serving on port 3002 — check with `curl localhost:3002/api/v2/profiles`
+
+**DmaPacket table is empty (0 rows):**
+- DGE notifications were not enabled during capture
+- Re-capture with `NEURON_RT_ENABLE_DGE_NOTIFICATIONS=1` set in the environment BEFORE running the kernel
+- The env var must be set before the Neuron runtime initializes (i.e., before any torch_neuronx or nki import triggers runtime init)
+
+**`nki_source_location` column is NULL for all instructions:**
+- Source attribution requires debug info in the NEFF
+- Recompile with `--internal-compiler-debug-mode=all` or ensure the NKI kernel was compiled from a named `.py` file (not inline string)
+- If using XLA, the compile workdir in `/tmp/` must still exist when profiling — run profiling promptly after compilation
+
+**`pyarrow` not installed (ImportError when reading parquet):**
+- The DLAMI pre-installed venvs may not include pyarrow
+- Install with: `pip install pyarrow` (takes ~10 seconds)
+- Alternative: use `duckdb` which includes its own parquet reader: `pip install duckdb`
+
+**Profile shows MFU < 10% for a matmul-heavy kernel:**
+- This almost always means the kernel is vector-engine-bound or DMA-bound, not compute-bound
+- Check `vector_engine_active_time_percent` — if >90%, the bottleneck is vector ops (casts, copies, reductions), not matmuls
+- Common fixes: reduce type casts in inner loops, increase tile sizes to reduce loop iterations, fuse operations
+- The `arithmetic_intensity` metric tells you if the kernel SHOULD be compute-bound (high intensity = yes). If intensity is high but MFU is low, the implementation is leaving the Tensor Engine idle
+
+**Comparing before/after profiles shows same `total_time` despite fewer instructions:**
+- The compiler may have rearranged or hidden the optimization behind other bottlenecks
+- Check if the bottleneck ENGINE changed (e.g., from VectorE to TensorE) — the kernel might now be bound by a different engine
+- Ensure you're comparing NEFF `total_time` (on-core), not wall-clock time (which includes ~86ms dispatch overhead that dominates small kernels)
+- If both versions are >95% VectorE utilization, the remaining vector ops are the irreducible minimum — further gains require algorithmic changes (pipelining, not instruction elimination)
+
 ## Related Skills
 
 | Skill | Purpose |

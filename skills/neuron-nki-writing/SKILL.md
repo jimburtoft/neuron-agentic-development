@@ -423,6 +423,51 @@ else:
 ```
 
 
+## Troubleshooting
+
+**`nc_matmul` moving free dimension exceeds max (512 on gen3/gen4):**
+- The moving tensor's free dimension is limited to 512 elements on trn2 (nc_version=3)
+- If you need a larger tile (e.g., K_TILE=1024), split into two sub-matmuls of 512 each and process results separately
+- This is common in flash attention when trying to increase K_TILE for fewer loop iterations
+
+**SBUF out-of-memory (spilling to HBM):**
+- trn2 has ~29MB of SBUF per NeuronCore. Monitor `spill_save_bytes` and `spill_reload_bytes` in profile output
+- Declare buffers inside inner loops rather than outside (reduces address lifetime conflicts)
+- Use `nl.sequential_range` for the KV loop to signal that tiles are processed one-at-a-time (reduces live buffer count)
+- As a last resort, reduce tile sizes (K_TILE from 512 to 256, or head_dim tiles from 128 to 64)
+
+**Kernel is vector-engine-bound despite being a matmul kernel:**
+- Common root cause: too many type casts and copies in the inner loop
+- Profile and check `vector_engine_instruction_count` vs `matmul_instruction_count`
+- Optimization: cast tensors once before the inner loop rather than per-iteration (e.g., cast exp_scores to bf16 once, then slice for each V tile)
+- Optimization: fuse scale/bias into `nisa.activation()` calls to reduce separate `tensor_scalar` instructions
+- Optimization: increase tile sizes to reduce total loop iterations (fewer softmax reductions, corrections, copies per token)
+
+**`attention_isa_kernel` produces wrong results or crashes at long sequences:**
+- The private `attention_isa_kernel` from `neuronxcc.nki._private_kernels.attention` is known to break at >10,240 tokens
+- For sequences longer than 10K tokens, use `attention_cte` from nkilib instead
+- `attention_cte` supports longer sequences via tiled processing and is the production-grade path
+
+**Flash attention head_dim > 128:**
+- Standard flash attention kernels (including nkilib's `attention_cte`) assume head_dim ≤ 128 (= PMAX, the partition dimension)
+- For models with head_dim=256 or 512 (e.g., Gemma4, Qwen3.5), you must split the head dimension into multiple 128-wide tiles and accumulate
+- This significantly increases kernel complexity — consider the pipelined `nki_flash_attn_d256_pipe` pattern
+
+**`nl.matmul` does not accept `dtype` kwarg:**
+- Unlike PyTorch's `torch.matmul`, `nl.matmul` infers output dtype from inputs
+- For bf16 inputs, PSUM accumulation is always fp32 internally — you don't need to specify it
+- If you need explicit dtype control, use `nisa.nc_matmul` with explicit buffer placement
+
+**3D tensor slice combined with indirect DMA causes OOB errors:**
+- NKI does not support indirect indexing on 3D tensors for DMA operations
+- Flatten or reshape to 2D before applying indirect DMA (gather/scatter) patterns
+- For block-sparse attention with gather indices, pre-compute flat offsets on the host and pass as a 2D index tensor
+
+**Softmax NaN with `-inf` mask values:**
+- On Neuron, `exp(-inf)` in bf16 can produce NaN rather than 0 in some code paths
+- Use `-9984.0` (LARGE_NEG constant, bf16-safe) or `-1e9` instead of `-inf` for attention mask padding
+- This affects both NKI kernels and traced models using `torch.nn.functional.scaled_dot_product_attention`
+
 ## Related Skills
 
 | Skill | Use When |

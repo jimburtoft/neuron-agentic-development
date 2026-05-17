@@ -287,9 +287,41 @@ assert torch.allclose(y.cpu(), reference, rtol=1e-4, atol=1e-6)
 print("Validation passed!")
 ```
 
-## Configuration
+## Troubleshooting
 
-**Required settings:**
+**Compilation takes extremely long (>10 minutes) or hangs:**
+- `-O3` optimization level rarely helps and can exceed instruction limits or increase tensor allocation. Stick with the default `-O2` (don't pass it explicitly — it's already applied)
+- `-O1` compiles faster and produces identical performance for `torch_neuronx.trace()` encoder models
+- If a 30+ layer model causes compiler ICE (internal compiler error with `stoi`), try reducing batch size or splitting into smaller traced modules
+
+**Compiler produces EOOM (out-of-memory) errors:**
+- EOOM001: SBUF exhausted. Reduce tile sizes, move buffers inside loops, use `nl.sequential_range` to limit live tensors
+- EOOM002: PSUM exhausted. PSUM free dimension is limited to 512 (gen2/gen3) or 4096 (gen4). Reduce matmul output tile or split into sub-tiles
+- Check for implicit spilling: large `affine_range` loops allocate all iterations simultaneously. Convert to `sequential_range` if buffers are the constraint
+
+**Kernel compiles but produces wrong numerical results:**
+- Check bf16 precision loss: intermediate accumulations must be in fp32 (especially softmax, reductions, running sums)
+- Verify broadcast semantics: `nisa.tensor_scalar` broadcasts `(PMAX, 1)` over `(PMAX, F)`, but the source must actually be shape `(PMAX, 1)` — a `(PMAX, F)` tensor won't broadcast
+- Validate against CPU reference with `cos_similarity > 0.999` for bf16 kernels (not just 0.99)
+- For online softmax: ensure `running_max` is initialized to a large negative value (e.g., `-9984.0`), not zero
+
+**`XLA_DISABLE_FUNCTIONALIZATION=1` needed for in-place operations:**
+- In SDK 2.27, XLA functionalization breaks in-place tensor operations
+- Set `os.environ["XLA_DISABLE_FUNCTIONALIZATION"] = "1"` before imports if using in-place ops
+- This is a known SDK issue, not a kernel bug
+
+**Compilation cache mismatches across SDK versions:**
+- NEFFs compiled with one SDK version are NOT compatible with another
+- Clear cache when switching SDKs: `rm -rf /var/tmp/neuron-compile-cache/`
+- Symptom: kernel loads from cache but produces wrong results or crashes at runtime
+
+**`neuron-ls` shows 0 cores or device not found:**
+- Verify you're on actual Trainium/Inferentia hardware (not a CPU-only instance)
+- Check `NEURON_RT_VISIBLE_CORES` is not set to an invalid range
+- On trn2.3xlarge: expect 4 cores (LNC=2) or 8 cores (LNC=1)
+- If cores show but kernel fails to load: check `NEURON_RT_VISIBLE_CORES` allows at least one core for your process
+
+**Configuration:**
 
 | Setting | Source | Description |
 |---------|--------|-------------|

@@ -343,3 +343,20 @@ See `examples/basic-profiling-workflow.py` for a complete end-to-end profiling s
 - Ensure system is not under other load
 - Run multiple iterations and average results
 - Check for thermal throttling in profile output
+
+**Thermal throttling consuming significant execution time:**
+- On trn2 instances, thermal throttling can consume up to 40% of measured execution time if the chip is hot from prior workloads
+- Allow 30-60 seconds of idle time between profiling runs for accurate measurements
+- Compare `total_time` from neuron-explorer summary against wall-clock time — a large gap indicates throttling or dispatch overhead
+- If benchmarking, discard the first 5+ iterations as warmup (not just compilation warmup, but thermal warmup)
+
+**NEFF dispatch overhead (~86ms) dominates wall-clock measurements:**
+- Each XLA `mark_step()` incurs ~86ms of fixed dispatch overhead on the host side
+- This means wall-clock benchmarks (e.g., `time.perf_counter()` around kernel calls) measure dispatch + execution, not just on-core time
+- For accurate kernel timing, always use neuron-profile/neuron-explorer `total_time` from the summary JSON, which measures only on-core execution
+- If wall-clock is ~96ms but on-core is ~4ms, the dispatch overhead dominates — the kernel is not the bottleneck in an end-to-end pipeline
+
+**Profiling XLA-compiled kernels vs PyTorch Native:**
+- XLA path: kernel runs via `torch_xla` with `xm.mark_step()`. Use `NEURON_RT_INSPECT_*` env vars to capture NEFF, then profile the NEFF separately with neuron-explorer
+- PyTorch Native path: kernel runs via `torch.device("neuron")`. Profiling is the same (capture NEFF + profile), but requires the PyTorch Native venv (`/opt/aws_neuronx_venv_pytorch_2_9_nxd_inference/` does NOT have PyTorch Native — check for a dedicated venv or Docker container)
+- When in doubt, profile the NEFF directly with `neuron-explorer capture -n <neff> -s <ntff>` regardless of how it was compiled
