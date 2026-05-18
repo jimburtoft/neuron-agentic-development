@@ -65,6 +65,39 @@ Activate before running any device tests:
 source $NKI_VENV_PATH/bin/activate
 ```
 
+## Remote Execution
+
+If developing on a local machine without Neuron hardware, all compilation and execution must happen on a remote Neuron instance via SSH.
+
+**Workflow pattern:**
+```bash
+# 1. Write/edit kernel locally (your development machine)
+# 2. Copy kernel to remote instance
+scp -i $NKI_KEY my_kernel.py test_kernel.py $NKI_HOST:$NKI_WORKDIR/
+
+# 3. Run test remotely — capture both stdout and stderr
+ssh -i $NKI_KEY $NKI_HOST "source $NKI_VENV/bin/activate && \
+  cd $NKI_WORKDIR && NEURON_RT_VISIBLE_CORES=0 python test_kernel.py" 2>&1
+
+# 4. If compilation fails, the error appears in the SSH output
+#    Edit the kernel locally, re-copy, and re-run (step 2-3)
+```
+
+**Debugging tips for remote execution:**
+- Compilation errors appear in stderr — always capture with `2>&1`
+- The error message includes the source file path ON THE REMOTE machine (e.g., `/home/ubuntu/nki-work/my_kernel.py:42`)
+- Map remote line numbers back to your local file for editing
+- Use `--verbose=info` in `NEURON_CC_FLAGS` for detailed compiler output when troubleshooting
+- If the kernel compiles but you need to inspect compiler artifacts, they're in `/tmp/$USER/neuroncc_compile_workdir/` on the remote instance
+
+**Iterative debug loop:**
+```bash
+# Quick re-run after local edit (single command)
+scp -i $NKI_KEY my_kernel.py $NKI_HOST:$NKI_WORKDIR/ && \
+ssh -i $NKI_KEY $NKI_HOST "source $NKI_VENV/bin/activate && \
+  cd $NKI_WORKDIR && NEURON_RT_VISIBLE_CORES=0 python test_kernel.py" 2>&1
+```
+
 ## Platform Detection
 
 Before compilation, detect the current hardware platform:

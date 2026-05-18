@@ -34,6 +34,50 @@ intervals.
 These come from `/neuron-nki-profiling` or from running a kernel with the right
 env vars and `neuron-explorer capture`.
 
+## Remote Execution
+
+If your development machine is separate from the Neuron instance, you have two options for profile analysis:
+
+**Option 1: Run analysis entirely on the remote instance (simpler)**
+```bash
+# Ingest to parquet on the remote instance
+ssh -i $NKI_KEY $NKI_HOST "neuron-explorer view --output-format parquet \
+  --data-path ~/parquet --display-name my-kernel \
+  -n <neff-path> -s <ntff-path> --ingest-only"
+
+# Run Python analysis remotely
+ssh -i $NKI_KEY $NKI_HOST "pip install pyarrow -q && python3 analyze.py"
+```
+
+**Option 2: Pull parquet files locally for analysis (better for iteration)**
+```bash
+# Ingest on remote, then pull parquet files
+ssh -i $NKI_KEY $NKI_HOST "neuron-explorer view --output-format parquet \
+  --data-path ~/parquet --display-name my-kernel \
+  -n <neff-path> -s <ntff-path> --ingest-only"
+
+# Pull parquet files locally (~5-10 MB total)
+scp -i $NKI_KEY -r $NKI_HOST:~/parquet/profiles/global/my-kernel@latest/ ./profile-data/
+
+# Analyze locally with pandas (no Neuron hardware needed)
+python3 -c "import pandas as pd; df = pd.read_parquet('./profile-data/Instruction.parquet'); ..."
+```
+
+**Option 3: SSH port forwarding for neuron-explorer API**
+```bash
+# Start neuron-explorer server on remote
+ssh -i $NKI_KEY $NKI_HOST "neuron-explorer view -n <neff> -s <ntff> \
+  --data-path ~/parquet --display-name my-kernel --disable-ui &"
+
+# Forward the API port locally (in a separate terminal)
+ssh -L 3002:localhost:3002 -i $NKI_KEY $NKI_HOST -N
+
+# Now curl localhost:3002 works from your local machine
+curl -s -X POST http://localhost:3002/api/v2/query -d '{"query": "SELECT * FROM Summary"}'
+```
+
+**Recommendation:** Option 2 (pull parquet locally) is best for iterative analysis. The parquet files are self-contained — once you have them, all pandas/duckdb analysis runs locally without needing the remote instance.
+
 ## Quick Start
 
 ```bash

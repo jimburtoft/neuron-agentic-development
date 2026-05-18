@@ -54,6 +54,43 @@ source $NKI_VENV_PATH/bin/activate
 
 **Hardware requirement:** Profiling requires execution on actual Trainium/Inferentia hardware.
 
+## Remote Execution
+
+If developing locally and executing on a remote Neuron instance via SSH, all device commands (kernel execution, neuron-explorer capture/view, identify-neffs.py) must run on the remote machine.
+
+**Setup:**
+```bash
+# Define remote target (set these in your environment or agent config)
+NKI_HOST="ubuntu@<instance-ip>"
+NKI_KEY="~/.ssh/<key>.pem"
+NKI_WORKDIR="~/nki-work"
+NKI_VENV="/opt/aws_neuronx_venv_pytorch_2_9_nxd_inference"
+```
+
+**Workflow pattern:**
+```bash
+# 1. Sync kernel code to remote
+scp -i $NKI_KEY my_kernel.py $NKI_HOST:$NKI_WORKDIR/
+
+# 2. Execute kernel remotely (generates NEFF)
+ssh -i $NKI_KEY $NKI_HOST "source $NKI_VENV/bin/activate && cd $NKI_WORKDIR && NEURON_RT_VISIBLE_CORES=0 python my_kernel.py"
+
+# 3. Capture profile remotely
+ssh -i $NKI_KEY $NKI_HOST "cd $NKI_WORKDIR && neuron-profile capture -n <neff-path> -s output/profile.ntff --ignore-exec-errors"
+
+# 4. Get summary JSON (output to local stdout)
+ssh -i $NKI_KEY $NKI_HOST "neuron-profile view --output-format summary-json -n <neff-path> -s $NKI_WORKDIR/output/profile.ntff"
+
+# 5. Pull artifacts locally for detailed analysis (optional)
+scp -i $NKI_KEY -r $NKI_HOST:$NKI_WORKDIR/output/ ./output/
+```
+
+**Tips:**
+- Find NEFFs remotely: `ssh ... "find /var/tmp/neuron-compile-cache -name '*.neff' -newer $NKI_WORKDIR/my_kernel.py"`
+- For neuron-explorer API access, use port forwarding: `ssh -L 3002:localhost:3002 -i $NKI_KEY $NKI_HOST`
+- Parquet files are small (~5-10 MB) — `scp` them locally for pandas/duckdb analysis on your dev machine
+- The `identify-neffs.py` script must run remotely (it reads NEFF binaries and checks `/tmp/` compile workdirs)
+
 ## Complete Profiling Workflow
 
 ### Step 1: Set Environment Variables

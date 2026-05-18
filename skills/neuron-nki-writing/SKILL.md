@@ -49,6 +49,18 @@ def my_kernel(input_hbm: nl.ndarray) -> nl.ndarray:
     return output
 ```
 
+## Remote Execution Note
+
+This skill is primarily about **writing kernel code** — it works on any machine regardless of hardware. However, to **validate** the kernel (compile and run correctness tests), you need Neuron hardware.
+
+If developing on a local machine without Neuron devices:
+1. Write and edit the kernel locally using this skill's patterns and references
+2. Copy the kernel + test script to your remote Neuron instance via `scp`
+3. Compile and test remotely via SSH (see `/neuron-nki-debugging` skill for the remote debug workflow)
+4. Profile remotely via SSH (see `/neuron-nki-profiling` skill for the remote profiling workflow)
+
+The kernel code itself is fully portable — only execution requires Neuron hardware.
+
 ## Complexity Assessment
 
 Before reading references, classify the task to avoid unnecessary overhead:
